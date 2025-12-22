@@ -1,5 +1,7 @@
 # Arducam Depth Camera
 
+**Note: Since our support channels are primarily via email, please send an email to support@arducam.com if you have any questions.   
+Asking questions in the issues may not get noticed!!!**
 ## Overview
 
 This project is a use example based on arducam's depth camera. It includes basic image rendering using opencv, displaying 3D point clouds using PCL, and publishing depth camera data through the ROS2 system.
