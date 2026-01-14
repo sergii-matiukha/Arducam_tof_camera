@@ -501,25 +501,62 @@ class MainWindow(QMainWindow):
 
         record_dir = Path(record_dir_raw)
         _ensure_dir(record_dir)
+        append_mode = False
         existing = list(record_dir.glob("depth_*.npy"))
         if existing:
-            self._show_error("Record", "Record dir already contains depth_*.npy. Choose an empty folder.")
-            return
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Record")
+            msg.setText("Selected folder already contains a dataset. Choose what to do:")
+            btn_new = msg.addButton("Create new subfolder", QMessageBox.ButtonRole.AcceptRole)
+            btn_append = msg.addButton("Append", QMessageBox.ButtonRole.ActionRole)
+            btn_cancel = msg.addButton(QMessageBox.StandardButton.Cancel)
+            msg.exec()
+            clicked = msg.clickedButton()
+            if clicked == btn_cancel:
+                return
+            if clicked == btn_new:
+                base = record_dir
+                stamp = time.strftime("run_%Y%m%d_%H%M%S")
+                record_dir = base / stamp
+                suffix = 1
+                while record_dir.exists() and any(record_dir.iterdir()):
+                    record_dir = base / f"{stamp}_{suffix}"
+                    suffix += 1
+                _ensure_dir(record_dir)
+            elif clicked == btn_append:
+                append_mode = True
 
-        meta = {
-            "range": float(self._camera_range),
-            "max_distance": int(self.args.max_distance),
-            "device_type": str(self._camera.getCameraInfo().device_type),
-            "time": time.time(),
-        }
-        _write_json(record_dir / "meta.json", meta)
+        meta_path = record_dir / "meta.json"
+        if not meta_path.exists():
+            meta = {
+                "range": float(self._camera_range),
+                "max_distance": int(self.args.max_distance),
+                "device_type": str(self._camera.getCameraInfo().device_type),
+                "time": time.time(),
+            }
+            _write_json(meta_path, meta)
 
         self._recording = True
         self._record_dir = record_dir
-        self._record_count = 0
-        self._record_ts = []
+        if append_mode:
+            indices = _list_frame_indices(record_dir)
+            self._record_count = (indices[-1] + 1) if len(indices) > 0 else 0
+            ts_path = record_dir / "timestamps.npy"
+            if ts_path.exists():
+                try:
+                    self._record_ts = [float(x) for x in np.load(ts_path).reshape(-1).tolist()]
+                except Exception:
+                    self._record_ts = []
+            else:
+                self._record_ts = []
+        else:
+            self._record_count = 0
+            self._record_ts = []
         self.record_btn.setText("Stop")
-        self.status_label.setText(f"Recording to: {record_dir}")
+        if append_mode:
+            self.status_label.setText(f"Recording (append) to: {record_dir}")
+        else:
+            self.status_label.setText(f"Recording to: {record_dir}")
 
     def _stop_recording(self, save_timestamps: bool) -> None:
         if not self._recording:
