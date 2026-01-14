@@ -177,6 +177,8 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel(f"Qt: {QT_BINDING}")
         self.statusBar().addWidget(self.status_label)
 
+        self._last_status_update_ts: float = 0.0
+
         if self.args.datasets_root is not None:
             self.datasets_root_edit.setText(self.args.datasets_root)
             self._refresh_dataset_list()
@@ -465,7 +467,8 @@ class MainWindow(QMainWindow):
         self._camera_range = float(cam.getControl(ac.Control.RANGE))
 
         self._camera = cam
-        self._live_timer.start(0)
+        # Keep UI responsive: pull frames ~30 FPS in the GUI thread.
+        self._live_timer.start(33)
         self.status_label.setText("Camera connected")
 
     def _disconnect_camera(self) -> None:
@@ -546,11 +549,31 @@ class MainWindow(QMainWindow):
         self._show_frames(preview, conf_vis)
 
         if self._recording and self._record_dir is not None:
-            depth_path, conf_path = _dataset_paths(self._record_dir, self._record_count)
-            np.save(depth_path, np.asarray(depth))
-            np.save(conf_path, np.asarray(conf))
-            self._record_ts.append(time.time())
-            self._record_count += 1
+            try:
+                depth_path, conf_path = _dataset_paths(self._record_dir, self._record_count)
+                np.save(depth_path, np.asarray(depth))
+                np.save(conf_path, np.asarray(conf))
+                self._record_ts.append(time.time())
+                self._record_count += 1
+
+                now = time.time()
+                # Throttle status updates to avoid UI overhead.
+                if now - self._last_status_update_ts >= 0.25:
+                    self.status_label.setText(
+                        f"REC {self._record_count} frames -> {self._record_dir}"
+                    )
+                    self._last_status_update_ts = now
+            except Exception as e:
+                record_dir = self._record_dir
+                self._stop_recording(save_timestamps=False)
+                self._show_error(
+                    "Record",
+                    "Failed to save dataset frame.\n"
+                    f"Directory: {record_dir}\n"
+                    f"Error: {type(e).__name__}: {e}",
+                )
+                self._camera.releaseFrame(frame)
+                return
 
         self._camera.releaseFrame(frame)
 
